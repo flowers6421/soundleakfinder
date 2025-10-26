@@ -1,0 +1,47 @@
+# Xcode
+.build/
+.swiftpm/
+*.xcodeproj/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcworkspace/xcuserdata/
+*.xcworkspace/xcshareddata/
+*.playground
+
+# Swift Package Manager
+.swiftpm/xcode/package.xcworkspace/xcuserdata/
+*.resolved
+
+# Build artifacts
+build/
+.build/
+*.app
+*.dSYM/
+*.su
+*.o
+*.a
+*.dylib
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+*.swp
+*~.nib
+
+# IDE
+.vscode/
+*.swiftpm
+
+# Logs
+*.log
+
+# Audio files (for testing)
+*.wav
+*.mp3
+*.m4a
+
