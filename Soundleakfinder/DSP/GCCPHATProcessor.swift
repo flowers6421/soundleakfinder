@@ -80,19 +80,26 @@ class GCCPHATProcessor {
     // MARK: - Private DSP Methods
 
     /// Compute cross-correlation with PHAT weighting
+    /// Cross-correlation: R[lag] = sum(signal1[i] * signal2[i - lag])
+    /// Positive lag means signal2 is delayed relative to signal1
     private func computeCrossCorrelationWithPHAT(_ signal1: [Float], _ signal2: [Float]) -> [Float] {
         let n = signal1.count
         var crossCorrelation = [Float](repeating: 0, count: 2 * n - 1)
 
         // Compute cross-correlation for all lags
-        for lag in 0..<(2 * n - 1) {
+        // Output index ranges from 0 to (2*n-2)
+        // Corresponding to lags from -(n-1) to (n-1)
+        for outputIdx in 0..<(2 * n - 1) {
+            let lag = outputIdx - (n - 1)  // Convert to signed lag: -(n-1) to (n-1)
             var sum: Float = 0.0
             var sumSquares1: Float = 0.0
             var sumSquares2: Float = 0.0
             var count = 0
 
+            // For each sample in signal1
             for i in 0..<n {
-                let j = i + lag - (n - 1)
+                // Corresponding index in signal2 is i - lag
+                let j = i - lag
                 if j >= 0 && j < n {
                     let s1 = signal1[i]
                     let s2 = signal2[j]
@@ -107,7 +114,7 @@ class GCCPHATProcessor {
             // PHAT weighting: normalize by magnitude
             if count > 0 && sumSquares1 > 1e-10 && sumSquares2 > 1e-10 {
                 let magnitude = sqrt(sumSquares1 * sumSquares2)
-                crossCorrelation[lag] = sum / magnitude
+                crossCorrelation[outputIdx] = sum / magnitude
             }
         }
 

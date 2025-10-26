@@ -6,27 +6,31 @@ struct GCCPHATValidation {
     /// Test TDOA estimation with synthetic signals
     static func validateTDOA() {
         print("🧪 Validating GCC-PHAT TDOA Estimation...")
-        
+
         let processor = GCCPHATProcessor(frameSize: 2048)
-        
+
         // Test 1: Zero delay (identical signals)
         print("\n  Test 1: Zero delay detection")
         let frequency: Float = 1000.0
         let sampleRate: Float = 48000.0
         let duration: Float = 0.1
         let frameLength = Int(sampleRate * duration)
-        
+
         var signal = [Float](repeating: 0, count: frameLength)
         for i in 0..<frameLength {
             let t = Float(i) / sampleRate
             signal[i] = sin(2.0 * .pi * frequency * t)
         }
-        
-        let result1 = processor.estimateTDOA(signal1: signal, signal2: signal)
-        print("    Delay: \(result1.delaySamples) samples, Confidence: \(String(format: "%.2f", result1.confidence))")
-        assert(abs(result1.delaySamples) <= 5, "Zero delay test failed")
-        print("    ✅ PASSED")
-        
+
+        do {
+            let result1 = processor.estimateTDOA(signal1: signal, signal2: signal)
+            print("    Delay: \(result1.delaySamples) samples, Confidence: \(String(format: "%.2f", result1.confidence))")
+            assert(abs(result1.delaySamples) <= 5, "Zero delay test failed: expected ~0, got \(result1.delaySamples)")
+            print("    ✅ PASSED")
+        } catch {
+            print("    ❌ FAILED: \(error)")
+        }
+
         // Test 2: Known delay
         print("\n  Test 2: Known delay detection (100 samples)")
         let delayInSamples = 100
@@ -36,12 +40,16 @@ struct GCCPHATValidation {
                 signal2[i] = signal[i - delayInSamples]
             }
         }
-        
-        let result2 = processor.estimateTDOA(signal1: signal, signal2: signal2)
-        print("    Detected delay: \(result2.delaySamples) samples, Confidence: \(String(format: "%.2f", result2.confidence))")
-        assert(abs(result2.delaySamples - delayInSamples) <= 10, "Known delay test failed")
-        print("    ✅ PASSED")
-        
+
+        do {
+            let result2 = processor.estimateTDOA(signal1: signal, signal2: signal2)
+            print("    Detected delay: \(result2.delaySamples) samples, Confidence: \(String(format: "%.2f", result2.confidence))")
+            assert(abs(result2.delaySamples - delayInSamples) <= 10, "Known delay test failed: expected ~\(delayInSamples), got \(result2.delaySamples)")
+            print("    ✅ PASSED")
+        } catch {
+            print("    ❌ FAILED: \(error)")
+        }
+
         // Test 3: Distance calculation
         print("\n  Test 3: Distance calculation from TDOA")
         let delaySeconds: Float = 0.001 // 1 ms
@@ -58,7 +66,7 @@ struct GCCPHATValidation {
         print("    Expected distance: \(String(format: "%.3f", expectedDistance)) m")
         assert(abs(distance - expectedDistance) < 0.01, "Distance calculation test failed")
         print("    ✅ PASSED")
-        
+
         print("\n✅ All GCC-PHAT validation tests passed!")
     }
     
