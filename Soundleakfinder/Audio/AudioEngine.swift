@@ -24,24 +24,14 @@ class AudioEngine: NSObject, ObservableObject {
     private let targetSampleRate: Double = 48000
     private let targetChannels: AVAudioChannelCount = 1
 
-    // Debug counters (accessed from audio thread, use atomic operations)
-    private let bufferCallbackCount = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
+    // Debug counters
+    private var bufferCallbackCount: Int = 0
     private var lastLogTime: Date = Date()
-
-    // Pre-allocated buffers to avoid allocations in audio callback
-    private var squaredDataBuffer: [Float] = []
-    private let maxFrameSize = 4096
 
     override init() {
         super.init()
-        bufferCallbackCount.initialize(to: 0)
-        squaredDataBuffer = [Float](repeating: 0, count: maxFrameSize)
         setupAudioEngine()
         requestMicrophonePermission()
-    }
-
-    deinit {
-        bufferCallbackCount.deallocate()
     }
 
     // MARK: - Setup
@@ -54,16 +44,18 @@ class AudioEngine: NSObject, ObservableObject {
     // MARK: - Permissions
 
     private func requestMicrophonePermission() {
-        // On macOS, microphone access is controlled by System Preferences
-        // We check if we have access to the default input device
+        // On macOS, AVAudioEngine handles microphone permission automatically
+        // when you try to access the input node. The Info.plist NSMicrophoneUsageDescription
+        // is what triggers the system permission dialog.
+        // We just check if we can access the input format as a basic check.
         let inputNode = audioEngine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         if format.sampleRate > 0 {
             permissionGranted = true
             print("✅ Microphone access available")
         } else {
-            print("⚠️ Microphone access may be restricted. Check System Preferences > Security & Privacy > Microphone")
             permissionGranted = false
+            print("⚠️ Microphone access may be restricted. Check System Settings > Privacy & Security > Microphone")
         }
     }
     
@@ -76,8 +68,13 @@ class AudioEngine: NSObject, ObservableObject {
 
             guard inputFormat.sampleRate > 0 else {
                 print("❌ Failed to get valid input format")
+                print("   This usually means microphone permission was denied")
+                print("   Please grant microphone access in System Settings > Privacy & Security > Microphone")
                 return
             }
+
+            // Update permission status
+            permissionGranted = true
 
             print("📊 Input format: \(inputFormat.sampleRate) Hz, \(inputFormat.channelCount) channels")
 
@@ -106,7 +103,7 @@ class AudioEngine: NSObject, ObservableObject {
             try audioEngine.start()
 
             isRunning = true
-            bufferCallbackCount.pointee = 0
+            bufferCallbackCount = 0
             lastLogTime = Date()
             print("✅ Audio engine started successfully")
             print("🎤 Listening for audio input...")
@@ -123,24 +120,32 @@ class AudioEngine: NSObject, ObservableObject {
         }
         isRunning = false
         print("🛑 Audio engine stopped")
-        print("📊 Total buffer callbacks received: \(bufferCallbackCount.pointee)")
+        print("📊 Total buffer callbacks received: \(bufferCallbackCount)")
     }
     
     // MARK: - Audio Processing
 
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) {
-        // Atomic increment
-        let currentCount = OSAtomicIncrement32Barrier(bufferCallbackCount)
+        bufferCallbackCount += 1
 
         guard let floatChannelData = buffer.floatChannelData else {
-            return  // Don't print in audio callback - too expensive
+            print("⚠️ No float channel data in buffer")
+            return
         }
 
         let frameLength = Int(buffer.frameLength)
         let channelCount = Int(buffer.format.channelCount)
 
-        guard frameLength > 0 && channelCount > 0 && frameLength <= maxFrameSize else {
+        guard frameLength > 0 && channelCount > 0 else {
+            print("⚠️ Invalid buffer: frameLength=\(frameLength), channels=\(channelCount)")
             return
+        }
+
+        // Log every 100 callbacks (approximately every 4-5 seconds at 2048 buffer size)
+        if bufferCallbackCount % 100 == 0 {
+            let elapsed = Date().timeIntervalSince(lastLogTime)
+            print("🎵 Buffer callback #\(bufferCallbackCount) - \(frameLength) frames, \(channelCount) channels, \(String(format: "%.1f", elapsed))s elapsed")
+            lastLogTime = Date()
         }
 
         // Calculate peak and RMS levels using vDSP for efficiency
@@ -158,17 +163,22 @@ class AudioEngine: NSObject, ObservableObject {
             let absMax = max(abs(channelPeak), abs(channelMin))
             peak = max(peak, absMax)
 
-            // Calculate RMS using vDSP - reuse pre-allocated buffer
-            vDSP_vsq(channelData, 1, &squaredDataBuffer, 1, vDSP_Length(frameLength))
+            // Calculate RMS using vDSP
+            var squaredData = [Float](repeating: 0, count: frameLength)
+            vDSP_vsq(channelData, 1, &squaredData, 1, vDSP_Length(frameLength))
 
             var sum: Float = 0.0
-            vDSP_sve(squaredDataBuffer, 1, &sum, vDSP_Length(frameLength))
+            vDSP_sve(squaredData, 1, &sum, vDSP_Length(frameLength))
             sumSquares += sum
         }
 
         let rms = sqrt(sumSquares / Float(frameLength * channelCount))
 
-        // Update UI on main thread (async to avoid blocking audio thread)
+        // Log if we detect significant audio
+        if bufferCallbackCount <= 10 || (peak > 0.01 && bufferCallbackCount % 50 == 0) {
+            print("🔊 Audio levels - Peak: \(String(format: "%.4f", peak)), RMS: \(String(format: "%.4f", rms))")
+        }
+
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.peakLevel = peak
@@ -176,22 +186,6 @@ class AudioEngine: NSObject, ObservableObject {
 
             // Update sound direction detection
             self.directionDetector.detectDirection(peakLevel: peak, rmsLevel: rms)
-
-            // Log periodically (only on main thread)
-            let count = self.bufferCallbackCount.pointee
-            if count % 100 == 0 {
-                let elapsed = Date().timeIntervalSince(self.lastLogTime)
-                print("🎵 Buffer callback #\(count) - \(frameLength) frames, \(channelCount) channels, \(String(format: "%.1f", elapsed))s elapsed")
-                self.lastLogTime = Date()
-            }
-
-            // Log if we detect significant audio
-            if count <= 10 || (peak > 0.01 && count % 50 == 0) {
-                print("🔊 Audio levels - Peak: \(String(format: "%.4f", peak)), RMS: \(String(format: "%.4f", rms))")
-                if let direction = self.directionDetector.soundDirection {
-                    print("   📍 Direction: \(String(format: "%.0f", direction.angle))°, Intensity: \(String(format: "%.2f", direction.intensity)), Distance: \(direction.distanceString)")
-                }
-            }
         }
     }
     

@@ -9,13 +9,6 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var audioEngine = AudioEngine()
-    @ObservedObject private var directionDetector: SoundDirectionDetector
-
-    init() {
-        let engine = AudioEngine()
-        _audioEngine = StateObject(wrappedValue: engine)
-        _directionDetector = ObservedObject(wrappedValue: engine.directionDetector)
-    }
 
     var body: some View {
         HStack(spacing: 20) {
@@ -128,8 +121,8 @@ struct ContentView: View {
 
             // Right panel - Sound direction visualization
             SoundDirectionView(
-                direction: directionDetector.soundDirection,
-                isDetecting: directionDetector.isDetecting
+                direction: audioEngine.directionDetector.soundDirection,
+                isDetecting: audioEngine.directionDetector.isDetecting
             )
             .frame(width: 300)
         }

@@ -16,13 +16,15 @@ class SoundDirectionDetector: ObservableObject {
     /// For now, uses a simple model based on audio intensity
     /// In future: integrate with TDOA for multi-microphone direction finding
     func detectDirection(peakLevel: Float, rmsLevel: Float) {
-        guard peakLevel > 0.001 || rmsLevel > 0.0001 else {
-            // Very quiet - no clear direction
+        // MUCH lower threshold - detect even very quiet sounds
+        // This allows detection of ambient noise and quiet sounds
+        guard peakLevel > 0.00001 || rmsLevel > 0.000001 else {
+            // Extremely quiet - no clear direction
             soundDirection = nil
             isDetecting = false
             return
         }
-        
+
         isDetecting = true
         
         // Calculate intensity (0-1 scale)
