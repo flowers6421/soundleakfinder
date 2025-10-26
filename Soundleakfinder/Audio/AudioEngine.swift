@@ -12,6 +12,9 @@ class AudioEngine: NSObject, ObservableObject {
     @Published var rmsLevel: Float = 0.0
     @Published var permissionGranted = false
 
+    // Sound direction detection
+    let directionDetector = SoundDirectionDetector()
+
     private let audioEngine = AVAudioEngine()
     private var audioBuffer: AVAudioPCMBuffer?
     private var bufferQueue: DispatchQueue = DispatchQueue(label: "com.soundleakfinder.audio.buffer")
@@ -21,14 +24,24 @@ class AudioEngine: NSObject, ObservableObject {
     private let targetSampleRate: Double = 48000
     private let targetChannels: AVAudioChannelCount = 1
 
-    // Debug counters
-    private var bufferCallbackCount: Int = 0
+    // Debug counters (accessed from audio thread, use atomic operations)
+    private let bufferCallbackCount = UnsafeMutablePointer<Int32>.allocate(capacity: 1)
     private var lastLogTime: Date = Date()
+
+    // Pre-allocated buffers to avoid allocations in audio callback
+    private var squaredDataBuffer: [Float] = []
+    private let maxFrameSize = 4096
 
     override init() {
         super.init()
+        bufferCallbackCount.initialize(to: 0)
+        squaredDataBuffer = [Float](repeating: 0, count: maxFrameSize)
         setupAudioEngine()
         requestMicrophonePermission()
+    }
+
+    deinit {
+        bufferCallbackCount.deallocate()
     }
 
     // MARK: - Setup
@@ -93,7 +106,7 @@ class AudioEngine: NSObject, ObservableObject {
             try audioEngine.start()
 
             isRunning = true
-            bufferCallbackCount = 0
+            bufferCallbackCount.pointee = 0
             lastLogTime = Date()
             print("✅ Audio engine started successfully")
             print("🎤 Listening for audio input...")
@@ -110,32 +123,24 @@ class AudioEngine: NSObject, ObservableObject {
         }
         isRunning = false
         print("🛑 Audio engine stopped")
-        print("📊 Total buffer callbacks received: \(bufferCallbackCount)")
+        print("📊 Total buffer callbacks received: \(bufferCallbackCount.pointee)")
     }
     
     // MARK: - Audio Processing
 
     private func processAudioBuffer(_ buffer: AVAudioPCMBuffer, time: AVAudioTime) {
-        bufferCallbackCount += 1
+        // Atomic increment
+        let currentCount = OSAtomicIncrement32Barrier(bufferCallbackCount)
 
         guard let floatChannelData = buffer.floatChannelData else {
-            print("⚠️ No float channel data in buffer")
-            return
+            return  // Don't print in audio callback - too expensive
         }
 
         let frameLength = Int(buffer.frameLength)
         let channelCount = Int(buffer.format.channelCount)
 
-        guard frameLength > 0 && channelCount > 0 else {
-            print("⚠️ Invalid buffer: frameLength=\(frameLength), channels=\(channelCount)")
+        guard frameLength > 0 && channelCount > 0 && frameLength <= maxFrameSize else {
             return
-        }
-
-        // Log every 100 callbacks (approximately every 4-5 seconds at 2048 buffer size)
-        if bufferCallbackCount % 100 == 0 {
-            let elapsed = Date().timeIntervalSince(lastLogTime)
-            print("🎵 Buffer callback #\(bufferCallbackCount) - \(frameLength) frames, \(channelCount) channels, \(String(format: "%.1f", elapsed))s elapsed")
-            lastLogTime = Date()
         }
 
         // Calculate peak and RMS levels using vDSP for efficiency
@@ -153,25 +158,40 @@ class AudioEngine: NSObject, ObservableObject {
             let absMax = max(abs(channelPeak), abs(channelMin))
             peak = max(peak, absMax)
 
-            // Calculate RMS using vDSP
-            var squaredData = [Float](repeating: 0, count: frameLength)
-            vDSP_vsq(channelData, 1, &squaredData, 1, vDSP_Length(frameLength))
+            // Calculate RMS using vDSP - reuse pre-allocated buffer
+            vDSP_vsq(channelData, 1, &squaredDataBuffer, 1, vDSP_Length(frameLength))
 
             var sum: Float = 0.0
-            vDSP_sve(squaredData, 1, &sum, vDSP_Length(frameLength))
+            vDSP_sve(squaredDataBuffer, 1, &sum, vDSP_Length(frameLength))
             sumSquares += sum
         }
 
         let rms = sqrt(sumSquares / Float(frameLength * channelCount))
 
-        // Log if we detect significant audio
-        if bufferCallbackCount <= 10 || (peak > 0.01 && bufferCallbackCount % 50 == 0) {
-            print("🔊 Audio levels - Peak: \(String(format: "%.4f", peak)), RMS: \(String(format: "%.4f", rms))")
-        }
-
-        DispatchQueue.main.async {
+        // Update UI on main thread (async to avoid blocking audio thread)
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
             self.peakLevel = peak
             self.rmsLevel = rms
+
+            // Update sound direction detection
+            self.directionDetector.detectDirection(peakLevel: peak, rmsLevel: rms)
+
+            // Log periodically (only on main thread)
+            let count = self.bufferCallbackCount.pointee
+            if count % 100 == 0 {
+                let elapsed = Date().timeIntervalSince(self.lastLogTime)
+                print("🎵 Buffer callback #\(count) - \(frameLength) frames, \(channelCount) channels, \(String(format: "%.1f", elapsed))s elapsed")
+                self.lastLogTime = Date()
+            }
+
+            // Log if we detect significant audio
+            if count <= 10 || (peak > 0.01 && count % 50 == 0) {
+                print("🔊 Audio levels - Peak: \(String(format: "%.4f", peak)), RMS: \(String(format: "%.4f", rms))")
+                if let direction = self.directionDetector.soundDirection {
+                    print("   📍 Direction: \(String(format: "%.0f", direction.angle))°, Intensity: \(String(format: "%.2f", direction.intensity)), Distance: \(direction.distanceString)")
+                }
+            }
         }
     }
     

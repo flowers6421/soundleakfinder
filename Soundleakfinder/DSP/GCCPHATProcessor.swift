@@ -16,8 +16,14 @@ class GCCPHATProcessor {
     /// Frame size for processing
     let frameSize: Int
 
-    /// Hann window for windowing
+    /// Hann window for windowing (DISABLED for maximum sensitivity)
     private var hannWindow: [Float]
+
+    /// Maximum sensitivity mode - detect ALL sounds including very quiet ones
+    var maximumSensitivity: Bool = true
+
+    /// Minimum threshold for detection (very low to catch all sounds)
+    var minimumDetectionThreshold: Float = 1e-12  // Extremely low threshold
 
     // MARK: - Initialization
 
@@ -47,16 +53,19 @@ class GCCPHATProcessor {
         let frameLength = signal1.count
         let searchLag = maxLag ?? frameLength / 2
 
-        // Apply Hann window to signals
-        var windowed1 = signal1
-        var windowed2 = signal2
+        // For MAXIMUM SENSITIVITY: Skip windowing to preserve all signal energy
+        // Windowing reduces edge effects but also reduces sensitivity to quiet sounds
+        var processedSignal1 = signal1
+        var processedSignal2 = signal2
 
-        // Apply window
-        vDSP_vmul(windowed1, 1, hannWindow, 1, &windowed1, 1, vDSP_Length(min(frameLength, frameSize)))
-        vDSP_vmul(windowed2, 1, hannWindow, 1, &windowed2, 1, vDSP_Length(min(frameLength, frameSize)))
+        if !maximumSensitivity {
+            // Only apply window if not in maximum sensitivity mode
+            vDSP_vmul(processedSignal1, 1, hannWindow, 1, &processedSignal1, 1, vDSP_Length(min(frameLength, frameSize)))
+            vDSP_vmul(processedSignal2, 1, hannWindow, 1, &processedSignal2, 1, vDSP_Length(min(frameLength, frameSize)))
+        }
 
         // Compute cross-correlation with PHAT weighting
-        let crossCorrelation = computeCrossCorrelationWithPHAT(windowed1, windowed2)
+        let crossCorrelation = computeCrossCorrelationWithPHAT(processedSignal1, processedSignal2)
 
         // Find peak in cross-correlation
         let (peakIndex, peakValue) = findPeak(in: crossCorrelation, maxLag: searchLag)
@@ -112,9 +121,14 @@ class GCCPHATProcessor {
             }
 
             // PHAT weighting: normalize by magnitude
-            if count > 0 && sumSquares1 > 1e-10 && sumSquares2 > 1e-10 {
+            // Use VERY LOW threshold for maximum sensitivity to detect quiet sounds
+            let threshold = maximumSensitivity ? minimumDetectionThreshold : 1e-10
+            if count > 0 && sumSquares1 > threshold && sumSquares2 > threshold {
                 let magnitude = sqrt(sumSquares1 * sumSquares2)
                 crossCorrelation[outputIdx] = sum / magnitude
+            } else if count > 0 {
+                // Even for very quiet signals, preserve the correlation value
+                crossCorrelation[outputIdx] = sum
             }
         }
 
