@@ -16,6 +16,19 @@ struct ContentView: View {
                 .font(.title)
                 .fontWeight(.bold)
 
+            // Permission Status
+            HStack {
+                Circle()
+                    .fill(audioEngine.permissionGranted ? Color.green : Color.red)
+                    .frame(width: 12, height: 12)
+                Text(audioEngine.permissionGranted ? "Microphone Access: Granted" : "Microphone Access: Denied")
+                    .font(.caption)
+                Spacer()
+            }
+            .padding()
+            .background(Color(.controlBackgroundColor))
+            .cornerRadius(8)
+
             // Status Section
             HStack {
                 Circle()

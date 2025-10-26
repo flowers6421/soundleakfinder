@@ -10,18 +10,20 @@ class AudioEngine: NSObject, ObservableObject {
     @Published var selectedDeviceID: AudioDeviceID?
     @Published var peakLevel: Float = 0.0
     @Published var rmsLevel: Float = 0.0
-    
+    @Published var permissionGranted = false
+
     private let audioEngine = AVAudioEngine()
     private var audioBuffer: AVAudioPCMBuffer?
     private var bufferQueue: DispatchQueue = DispatchQueue(label: "com.soundleakfinder.audio.buffer")
-    
+
     // Audio format: 48 kHz, mono, Float32
     private let targetSampleRate: Double = 48000
     private let targetChannels: AVAudioChannelCount = 1
-    
+
     override init() {
         super.init()
         setupAudioEngine()
+        requestMicrophonePermission()
     }
 
     // MARK: - Setup
@@ -29,6 +31,22 @@ class AudioEngine: NSObject, ObservableObject {
     private func setupAudioEngine() {
         // macOS doesn't use AVAudioSession, audio is managed via Core Audio
         print("Audio engine initialized for macOS")
+    }
+
+    // MARK: - Permissions
+
+    private func requestMicrophonePermission() {
+        // On macOS, microphone access is controlled by System Preferences
+        // We check if we have access to the default input device
+        let inputNode = audioEngine.inputNode
+        let format = inputNode.outputFormat(forBus: 0)
+        if format.sampleRate > 0 {
+            permissionGranted = true
+            print("✅ Microphone access available")
+        } else {
+            print("⚠️ Microphone access may be restricted. Check System Preferences > Security & Privacy > Microphone")
+            permissionGranted = false
+        }
     }
     
     // MARK: - Audio Engine Control
