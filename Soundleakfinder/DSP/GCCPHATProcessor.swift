@@ -22,8 +22,8 @@ class GCCPHATProcessor {
     /// Maximum sensitivity mode - detect ALL sounds including very quiet ones
     var maximumSensitivity: Bool = true
 
-    /// Minimum threshold for detection (very low to catch all sounds)
-    var minimumDetectionThreshold: Float = 1e-12  // Extremely low threshold
+    /// Minimum threshold for detection (ultra-low to catch even quieter sounds)
+    var minimumDetectionThreshold: Float = 1e-15  // Ultra-low threshold for maximum sensitivity
 
     // MARK: - Initialization
 

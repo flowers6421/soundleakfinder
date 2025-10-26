@@ -28,6 +28,29 @@ class AudioEngine: NSObject, ObservableObject {
     private var bufferCallbackCount: Int = 0
     private var lastLogTime: Date = Date()
 
+    // MARK: - Sensitivity Enhancement State
+    // Pre-amplification (in dB) applied only for metering/detection, not to audio output
+    private var preGainDB: Float = 12.0
+    private var preGain: Float { pow(10.0, preGainDB / 20.0) }
+
+    // Adaptive noise floor (EMA of quiet frames)
+    private var noiseFloorRMS: Float = 0.005
+    private var noiseFloorPeak: Float = 0.008
+    private let noiseEMAAlphaQuiet: Float = 0.01   // slow rise
+    private let noiseEMAAlphaIdle: Float = 0.002   // very slow when signal present
+
+    // Attack/Release smoothing for UI stability
+    private let levelAttack: Float = 0.35
+    private let levelRelease: Float = 0.08
+    private var smoothedRMSLevel: Float = 0.0
+    private var smoothedPeakLevel: Float = 0.0
+
+    // SNR-based detection threshold (in dB)
+    private var snrThresholdDB: Float = 1.5
+
+    // Extra visual scaling to make low signals visible
+    private var levelScale: Float = 4.0
+
     override init() {
         super.init()
         setupAudioEngine()
@@ -148,8 +171,8 @@ class AudioEngine: NSObject, ObservableObject {
             lastLogTime = Date()
         }
 
-        // Calculate peak and RMS levels using vDSP for efficiency
-        var peak: Float = 0.0
+        // Calculate raw peak and RMS levels using vDSP for efficiency
+        var rawPeak: Float = 0.0
         var sumSquares: Float = 0.0
 
         for channel in 0..<channelCount {
@@ -161,7 +184,7 @@ class AudioEngine: NSObject, ObservableObject {
             vDSP_maxv(channelData, 1, &channelPeak, vDSP_Length(frameLength))
             vDSP_minv(channelData, 1, &channelMin, vDSP_Length(frameLength))
             let absMax = max(abs(channelPeak), abs(channelMin))
-            peak = max(peak, absMax)
+            rawPeak = max(rawPeak, absMax)
 
             // Calculate RMS using vDSP
             var squaredData = [Float](repeating: 0, count: frameLength)
@@ -172,20 +195,51 @@ class AudioEngine: NSObject, ObservableObject {
             sumSquares += sum
         }
 
-        let rms = sqrt(sumSquares / Float(frameLength * channelCount))
+        let rawRMS = sqrt(sumSquares / Float(frameLength * channelCount))
 
-        // Log if we detect significant audio
-        if bufferCallbackCount <= 10 || (peak > 0.01 && bufferCallbackCount % 50 == 0) {
-            print("🔊 Audio levels - Peak: \(String(format: "%.4f", peak)), RMS: \(String(format: "%.4f", rms))")
+        // Apply pre-gain for detection/metering (not altering audio path)
+        let gPeak = min(1.0, rawPeak * preGain)
+        let gRMS  = min(1.0, rawRMS  * preGain)
+
+        // Adaptive noise floor update (slowly follows quiet background)
+        let snrLinear = max(gRMS / max(noiseFloorRMS, 1e-7), 1e-7)
+        let snrDb = 20.0 * Float(log10(Double(snrLinear)))
+        let alpha = (snrDb < snrThresholdDB - 0.5) ? noiseEMAAlphaQuiet : noiseEMAAlphaIdle
+        noiseFloorRMS  = max(0.0001, (1 - alpha) * noiseFloorRMS  + alpha * gRMS)
+        noiseFloorPeak = max(0.0002, (1 - alpha) * noiseFloorPeak + alpha * gPeak)
+
+        // Normalize relative to noise floor to emphasize quiet sounds
+        let normRMS  = max(0.0, gRMS  - noiseFloorRMS)  / max(1e-6, 1.0 - noiseFloorRMS)
+        let normPeak = max(0.0, gPeak - noiseFloorPeak) / max(1e-6, 1.0 - noiseFloorPeak)
+
+        // Extra scaling so small changes are visible; clamp to [0,1]
+        var dispRMS  = min(1.0, normRMS  * levelScale)
+        var dispPeak = min(1.0, normPeak * levelScale)
+
+        // Attack/Release smoothing for UI stability
+        func smooth(current: inout Float, target: Float) {
+            if target > current {
+                current += levelAttack * (target - current)
+            } else {
+                current += levelRelease * (target - current)
+            }
+        }
+        smooth(current: &smoothedRMSLevel, target: dispRMS)
+        smooth(current: &smoothedPeakLevel, target: dispPeak)
+
+        // Occasional debug logging
+        if bufferCallbackCount <= 10 || (gPeak > noiseFloorPeak * 1.05 && bufferCallbackCount % 50 == 0) {
+            print(String(format: "🔊 raw P/R=%.4f/%.4f, g P/R=%.4f/%.4f, NF P/R=%.4f/%.4f, SNR=%.1f dB", rawPeak, rawRMS, gPeak, gRMS, noiseFloorPeak, noiseFloorRMS, snrDb))
         }
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            self.peakLevel = peak
-            self.rmsLevel = rms
+            self.peakLevel = self.smoothedPeakLevel
+            self.rmsLevel = self.smoothedRMSLevel
 
-            // Update sound direction detection
-            self.directionDetector.detectDirection(peakLevel: peak, rmsLevel: rms)
+            // Update sound direction detection with enhanced levels
+            self.directionDetector.detectDirection(peakLevel: self.smoothedPeakLevel,
+                                                   rmsLevel: self.smoothedRMSLevel)
         }
     }
     
