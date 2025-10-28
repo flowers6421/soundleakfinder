@@ -9,7 +9,7 @@ A professional macOS acoustic source localization app for detecting and locating
 ## ✨ Features
 
 - 📍 **Real-time Sound Source Localization**: Pinpoint the exact location of sound sources using advanced DSP algorithms
-- 📊 **Live Visualization**: Real-time display of sound source direction and intensity
+- 📊 **Live Visualization**: Real-time display of sound intensity
 - ⚡ **High-Performance DSP**: GCC-PHAT and TDOA algorithms using Apple's Accelerate framework
 
 ## 🚀 Quick Start
