@@ -11,6 +11,7 @@ DerivedData/
 *.xcworkspace/xcuserdata/
 *.xcworkspace/xcshareddata/
 *.playground
+*.xcodeproj/project.pbxproj.backup
 
 # Swift Package Manager
 .swiftpm/xcode/package.xcworkspace/xcuserdata/
@@ -25,6 +26,12 @@ build/
 *.o
 *.a
 *.dylib
+
+# Distribution
+*.dmg
+*.pkg
+AppIcon.iconset/
+AppIcon.icns
 
 # macOS
 .DS_Store
@@ -45,3 +52,10 @@ build/
 *.mp3
 *.m4a
 
+# Temporary files
+*.png
+*.jpg
+*.jpeg
+Tasks_*.md
+add_files_to_project.sh
+DISTRIBUTION.md

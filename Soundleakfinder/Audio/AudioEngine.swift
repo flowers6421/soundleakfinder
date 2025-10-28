@@ -12,8 +12,15 @@ class AudioEngine: NSObject, ObservableObject {
     @Published var rmsLevel: Float = 0.0
     @Published var permissionGranted = false
 
-    // Sound direction detection
-    let directionDetector = SoundDirectionDetector()
+    // Sensitivity control (0.1 to 2.0, default 1.0 = middle)
+    @Published var sensitivity: Float = 1.0 {
+        didSet {
+            updateSensitivity()
+        }
+    }
+
+    // Sound level detection
+    let levelDetector = SoundLevelDetector()
 
     private let audioEngine = AVAudioEngine()
     private var audioBuffer: AVAudioPCMBuffer?
@@ -30,6 +37,8 @@ class AudioEngine: NSObject, ObservableObject {
 
     // MARK: - Sensitivity Enhancement State
     // Pre-amplification (in dB) applied only for metering/detection, not to audio output
+    // Base gain at sensitivity = 1.0 (middle)
+    private let basePreGainDB: Float = 12.0
     private var preGainDB: Float = 12.0
     private var preGain: Float { pow(10.0, preGainDB / 20.0) }
 
@@ -51,6 +60,27 @@ class AudioEngine: NSObject, ObservableObject {
     // Extra visual scaling to make low signals visible
     private var levelScale: Float = 4.0
 
+    // MARK: - Sensitivity Control
+
+    private func updateSensitivity() {
+        // Map sensitivity (0.1 to 2.0) to gain adjustment
+        // sensitivity = 0.1 -> -20 dB (very low)
+        // sensitivity = 1.0 -> 0 dB (default, middle)
+        // sensitivity = 2.0 -> +12 dB (very high)
+
+        let gainAdjustmentDB: Float
+        if sensitivity < 1.0 {
+            // Below middle: scale from -20 dB to 0 dB
+            gainAdjustmentDB = (sensitivity - 1.0) * 20.0
+        } else {
+            // Above middle: scale from 0 dB to +12 dB
+            gainAdjustmentDB = (sensitivity - 1.0) * 12.0
+        }
+
+        preGainDB = basePreGainDB + gainAdjustmentDB
+        print("🎚️ Sensitivity: \(Int(sensitivity * 100))% | Gain: \(String(format: "%.1f", preGainDB)) dB")
+    }
+
     override init() {
         super.init()
         setupAudioEngine()
@@ -67,18 +97,34 @@ class AudioEngine: NSObject, ObservableObject {
     // MARK: - Permissions
 
     private func requestMicrophonePermission() {
-        // On macOS, AVAudioEngine handles microphone permission automatically
-        // when you try to access the input node. The Info.plist NSMicrophoneUsageDescription
-        // is what triggers the system permission dialog.
-        // We just check if we can access the input format as a basic check.
-        let inputNode = audioEngine.inputNode
-        let format = inputNode.outputFormat(forBus: 0)
-        if format.sampleRate > 0 {
-            permissionGranted = true
-            print("✅ Microphone access available")
-        } else {
-            permissionGranted = false
-            print("⚠️ Microphone access may be restricted. Check System Settings > Privacy & Security > Microphone")
+        // On macOS, we need to explicitly request microphone permission using AVCaptureDevice
+        // This ensures the permission dialog appears and the TCC database is properly updated
+        Task { @MainActor in
+            switch AVCaptureDevice.authorizationStatus(for: .audio) {
+            case .authorized:
+                self.permissionGranted = true
+                print("✅ Microphone access already authorized")
+
+            case .notDetermined:
+                print("🎤 Requesting microphone permission...")
+                let granted = await AVCaptureDevice.requestAccess(for: .audio)
+                self.permissionGranted = granted
+                if granted {
+                    print("✅ Microphone permission granted")
+                } else {
+                    print("❌ Microphone permission denied")
+                    print("   Please grant microphone access in System Settings > Privacy & Security > Microphone")
+                }
+
+            case .denied, .restricted:
+                self.permissionGranted = false
+                print("⚠️ Microphone access denied or restricted")
+                print("   Please grant microphone access in System Settings > Privacy & Security > Microphone")
+
+            @unknown default:
+                self.permissionGranted = false
+                print("⚠️ Unknown microphone permission status")
+            }
         }
     }
     
@@ -237,9 +283,11 @@ class AudioEngine: NSObject, ObservableObject {
             self.peakLevel = self.smoothedPeakLevel
             self.rmsLevel = self.smoothedRMSLevel
 
-            // Update sound direction detection with enhanced levels
-            self.directionDetector.detectDirection(peakLevel: self.smoothedPeakLevel,
-                                                   rmsLevel: self.smoothedRMSLevel)
+            // Update sound level detection
+            self.levelDetector.detectLevel(
+                peakLevel: self.smoothedPeakLevel,
+                rmsLevel: self.smoothedRMSLevel
+            )
         }
     }
     

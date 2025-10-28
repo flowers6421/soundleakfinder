@@ -9,100 +9,102 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var audioEngine = AudioEngine()
+    @Environment(\.colorScheme) var colorScheme
 
     var body: some View {
-        HStack(spacing: 20) {
-            // Left panel - Controls and status
-            VStack(spacing: 20) {
-                Text("🔊 Sound Leak Finder")
-                    .font(.title)
-                    .fontWeight(.bold)
-
-                // Permission Status
-                HStack {
-                    Circle()
-                        .fill(audioEngine.permissionGranted ? Color.green : Color.red)
-                        .frame(width: 12, height: 12)
-                    Text(audioEngine.permissionGranted ? "Microphone Access: Granted" : "Microphone Access: Denied")
-                        .font(.caption)
-                    Spacer()
+        HStack(spacing: 0) {
+            // Left sidebar - Minimal controls
+            VStack(spacing: 0) {
+                // Header
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Sound Level Meter")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.primary)
                 }
-                .padding()
-                .background(Color(.controlBackgroundColor))
-                .cornerRadius(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+                .padding(.top, 24)
+                .padding(.bottom, 32)
 
-                // Status Section
-                HStack {
-                    Circle()
-                        .fill(audioEngine.isRunning ? Color.green : Color.gray)
-                        .frame(width: 12, height: 12)
-                    Text(audioEngine.isRunning ? "Recording" : "Stopped")
-                        .font(.subheadline)
-                    Spacer()
-                }
-                .padding()
-                .background(Color(.controlBackgroundColor))
-                .cornerRadius(8)
-
-                // Level Meters
+                // Status indicator - minimal
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Audio Levels")
-                        .font(.headline)
+                    Text("STATUS")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .tracking(0.6)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack {
-                            Text("Peak:")
-                                .frame(width: 50, alignment: .leading)
-                            ProgressView(value: Double(audioEngine.peakLevel), total: 1.0)
-                            Text(String(format: "%.2f", audioEngine.peakLevel))
-                                .font(.caption)
-                                .frame(width: 40, alignment: .trailing)
-                        }
+                    HStack(spacing: 8) {
+                        Circle()
+                            .fill(audioEngine.isRunning ? Color.green : Color.secondary.opacity(0.5))
+                            .frame(width: 8, height: 8)
 
-                        HStack {
-                            Text("RMS:")
-                                .frame(width: 50, alignment: .leading)
-                            ProgressView(value: Double(audioEngine.rmsLevel), total: 1.0)
-                            Text(String(format: "%.2f", audioEngine.rmsLevel))
-                                .font(.caption)
-                                .frame(width: 40, alignment: .trailing)
-                        }
+                        Text(audioEngine.isRunning ? "Recording" : "Stopped")
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(.primary)
                     }
                 }
-                .padding()
-                .background(Color(.controlBackgroundColor))
-                .cornerRadius(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
 
-                // Device Selection
+                Divider()
+                    .padding(.horizontal, 24)
+
+                // Input device - clean and simple
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Input Devices")
-                        .font(.headline)
+                    Text("INPUT DEVICE")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .tracking(0.6)
 
                     if audioEngine.inputDevices.isEmpty {
-                        Text("No input devices found")
-                            .font(.caption)
-                            .foregroundColor(.gray)
+                        Text("No devices found")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
                     } else {
-                        Picker("Device", selection: $audioEngine.selectedDeviceID) {
+                        Picker("", selection: $audioEngine.selectedDeviceID) {
                             ForEach(audioEngine.inputDevices) { device in
-                                Text(device.name).tag(Optional(device.id))
+                                Text(device.name)
+                                    .font(.system(size: 13))
+                                    .tag(Optional(device.id))
                             }
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
                     }
                 }
-                .padding()
-                .background(Color(.controlBackgroundColor))
-                .cornerRadius(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+                .padding(.top, 24)
+                .padding(.bottom, 20)
 
-                // Control Buttons
-                HStack(spacing: 12) {
-                    Button(action: {
-                        audioEngine.enumerateInputDevices()
-                    }) {
-                        Label("Scan Devices", systemImage: "arrow.clockwise")
+                // Sensitivity slider - minimal and elegant
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("SENSITIVITY")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.tertiary)
+                            .tracking(0.6)
+
+                        Spacer()
+
+                        Text("\(Int(audioEngine.sensitivity * 100))%")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
                     }
-                    .buttonStyle(.bordered)
 
+                    Slider(value: $audioEngine.sensitivity, in: 0.1...2.0)
+                        .tint(.blue)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
+
+                Spacer()
+
+                // Bottom controls - minimal
+                VStack(spacing: 12) {
                     Button(action: {
                         if audioEngine.isRunning {
                             audioEngine.stopAudioEngine()
@@ -110,23 +112,46 @@ struct ContentView: View {
                             audioEngine.startAudioEngine()
                         }
                     }) {
-                        Label(audioEngine.isRunning ? "Stop" : "Start", systemImage: audioEngine.isRunning ? "stop.fill" : "play.fill")
+                        Text(audioEngine.isRunning ? "Stop" : "Start")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 12)
                     }
                     .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(audioEngine.isRunning ? .red : .blue)
+
+                    Button(action: {
+                        audioEngine.enumerateInputDevices()
+                    }) {
+                        Text("Refresh Devices")
+                            .font(.system(size: 13, weight: .medium))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.bordered)
                 }
-
-                Spacer()
+                .padding(.horizontal, 24)
+                .padding(.bottom, 24)
             }
-            .frame(width: 350)
+            .frame(width: 280)
+            .background(.ultraThinMaterial)
 
-            // Right panel - Sound direction visualization
-            SoundDirectionView(
-                direction: audioEngine.directionDetector.soundDirection,
-                isDetecting: audioEngine.directionDetector.isDetecting
+            Divider()
+
+            // Main content - Sound level visualization
+            SoundLevelMeterView(
+                soundLevel: audioEngine.levelDetector.soundLevel,
+                isDetecting: audioEngine.levelDetector.isDetecting
             )
-            .frame(width: 300)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .padding()
+        .frame(minWidth: 900, minHeight: 600)
+        .background(
+            colorScheme == .dark ?
+                Color(red: 0.11, green: 0.11, blue: 0.12) :
+                Color(red: 0.98, green: 0.98, blue: 0.99)
+        )
         .onAppear {
             audioEngine.enumerateInputDevices()
         }
@@ -135,4 +160,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+        .frame(width: 900, height: 600)
 }
